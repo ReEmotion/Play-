@@ -21,6 +21,9 @@ namespace Ui
 }
 
 class OutputWindow;
+#ifdef BUILD_REMOTE_DEBUGGER
+class RemoteDebuggerServer;
+#endif
 
 #ifdef DEBUGGER_INCLUDED
 class QtDebugger;
@@ -41,6 +44,11 @@ public:
 	explicit MainWindow(QWidget* parent = nullptr);
 	~MainWindow();
 
+#ifdef BUILD_REMOTE_DEBUGGER
+	void StartRemoteDebugger(const QString& endpoint);
+	void StartRemoteDebuggerFromPreferences();
+	void StopRemoteDebugger();
+#endif
 	void BootElf(fs::path);
 	void BootCDROM();
 	void LoadCDROM(fs::path filePath);
@@ -109,8 +117,14 @@ private:
 	QTimer* m_fpsTimer = nullptr;
 	CContinuationChecker* m_continuationChecker = nullptr;
 	CPS2VM* m_virtualMachine = nullptr;
+	bool m_remoteDebugEnabled = false;
+	bool m_closing = false;
+#ifdef BUILD_REMOTE_DEBUGGER
+	std::unique_ptr<RemoteDebuggerServer> m_remoteDebugger;
+	QString m_remoteDebugEndpoint;
+#endif
 	bool m_deactivatePause = false;
-	bool m_pauseFocusLost = true;
+	bool m_allowBackgroundRun = true;
 	std::shared_ptr<CInputProviderQtKey> m_qtKeyInputProvider;
 	std::shared_ptr<CInputProviderQtMouse> m_qtMouseInputProvider;
 	LastOpenCommand m_lastOpenCommand;
@@ -123,6 +137,7 @@ private:
 	CVirtualMachine::RunningStateChangeEvent::Connection m_onRunningStateChangeConnection;
 
 #ifdef DEBUGGER_INCLUDED
+	CGSHandler::FrameDumpFailureEvent::Connection m_frameDumpFailureConnection;
 	std::unique_ptr<QtDebugger> m_debugger;
 	std::unique_ptr<QtFramedebugger> m_frameDebugger;
 	Ui::DebugDockMenu* debugDockMenuUi = nullptr;
@@ -157,7 +172,7 @@ private slots:
 	void outputWindow_mouseMoveEvent(QMouseEvent*);
 	void outputWindow_mousePressEvent(QMouseEvent*);
 	void outputWindow_mouseReleaseEvent(QMouseEvent*);
-	void on_actionPause_when_focus_is_lost_triggered(bool checked);
+	void on_actionAllow_background_run_triggered(bool checked);
 	void on_actionReset_triggered();
 	void on_actionMemory_Card_Manager_triggered();
 	void on_actionVFS_Manager_triggered();

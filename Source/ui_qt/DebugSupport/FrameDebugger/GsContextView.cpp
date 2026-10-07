@@ -228,28 +228,27 @@ Framework::CBitmap CGsContextView::PostProcessRenderbuffer(Framework::CBitmap bu
 
 void CGsContextView::RenderDrawKick(Framework::CBitmap& bitmap)
 {
-	if(m_drawingKick.primType == CGSHandler::PRIM_INVALID) return;
-	if(m_drawingKick.context != m_contextId) return;
+	int scale = 1;
+	if(auto iface = dynamic_cast<CGsDebuggerInterface*>(m_gs.get())) scale = iface->GetFramebufferScale();
+	DrawKick(bitmap, m_drawingKick, m_contextId, scale);
+}
 
-	int fbScale = 1;
-	if(auto debuggerInterface = dynamic_cast<CGsDebuggerInterface*>(m_gs.get()))
-	{
-		fbScale = debuggerInterface->GetFramebufferScale();
-	}
-
+void CGsContextView::DrawKick(Framework::CBitmap& bitmap, const DRAWINGKICK_INFO& drawingKick, unsigned context, int fbScale)
+{
+	if(drawingKick.primType == CGSHandler::PRIM_INVALID || drawingKick.context != context || bitmap.IsEmpty()) return;
 	auto primHighlightColor = Framework::CColor(0, 0xFF, 0, 0xFF);
-	switch(m_drawingKick.primType)
+	switch(drawingKick.primType)
 	{
 	case CGSHandler::PRIM_TRIANGLE:
 	case CGSHandler::PRIM_TRIANGLESTRIP:
 	case CGSHandler::PRIM_TRIANGLEFAN:
 	{
-		int x1 = (m_drawingKick.vertex[0].x / 16) * fbScale;
-		int y1 = (m_drawingKick.vertex[0].y / 16) * fbScale;
-		int x2 = (m_drawingKick.vertex[1].x / 16) * fbScale;
-		int y2 = (m_drawingKick.vertex[1].y / 16) * fbScale;
-		int x3 = (m_drawingKick.vertex[2].x / 16) * fbScale;
-		int y3 = (m_drawingKick.vertex[2].y / 16) * fbScale;
+		int x1 = (drawingKick.vertex[0].x / 16) * fbScale;
+		int y1 = (drawingKick.vertex[0].y / 16) * fbScale;
+		int x2 = (drawingKick.vertex[1].x / 16) * fbScale;
+		int y2 = (drawingKick.vertex[1].y / 16) * fbScale;
+		int x3 = (drawingKick.vertex[2].x / 16) * fbScale;
+		int y3 = (drawingKick.vertex[2].y / 16) * fbScale;
 		bitmap.DrawLine(x1, y1, x2, y2, primHighlightColor);
 		bitmap.DrawLine(x1, y1, x3, y3, primHighlightColor);
 		bitmap.DrawLine(x2, y2, x3, y3, primHighlightColor);
@@ -257,10 +256,10 @@ void CGsContextView::RenderDrawKick(Framework::CBitmap& bitmap)
 	break;
 	case CGSHandler::PRIM_SPRITE:
 	{
-		int x1 = (m_drawingKick.vertex[0].x / 16) * fbScale;
-		int y1 = (m_drawingKick.vertex[0].y / 16) * fbScale;
-		int x2 = (m_drawingKick.vertex[1].x / 16) * fbScale;
-		int y2 = (m_drawingKick.vertex[1].y / 16) * fbScale;
+		int x1 = (drawingKick.vertex[0].x / 16) * fbScale;
+		int y1 = (drawingKick.vertex[0].y / 16) * fbScale;
+		int x2 = (drawingKick.vertex[1].x / 16) * fbScale;
+		int y2 = (drawingKick.vertex[1].y / 16) * fbScale;
 		bitmap.DrawLine(x1, y1, x1, y2, primHighlightColor);
 		bitmap.DrawLine(x1, y2, x2, y2, primHighlightColor);
 		bitmap.DrawLine(x2, y2, x2, y1, primHighlightColor);

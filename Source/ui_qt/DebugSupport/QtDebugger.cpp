@@ -19,6 +19,7 @@
 #include "string_format.h"
 #include "PathUtils.h"
 #include "DebugUtils.h"
+#include "DebuggerBackend.h"
 
 #define PREF_DEBUGGER_MEMORYVIEW_BYTEWIDTH "debugger.memoryview.bytewidth"
 
@@ -289,7 +290,7 @@ void QtDebugger::AssembleJAL()
 	if(!getAddress("Enter jump target:", nValueTarget)) return;
 	if(!getAddress("Enter address to assemble JAL to:", nValueAssemble)) return;
 
-	*(uint32*)&m_virtualMachine.m_ee->m_ram[nValueAssemble] = 0x0C000000 | (nValueTarget / 4);
+	Debugger::LocalCall(m_virtualMachine, "assemble.jal", {{"address", Debugger::Hex(nValueAssemble)}, {"target", Debugger::Hex(nValueTarget)}});
 }
 
 void QtDebugger::ReanalyzeEe()
@@ -337,74 +338,12 @@ void QtDebugger::ReanalyzeEe()
 	minAddr = std::min<uint32>(minAddr, PS2::EE_RAM_SIZE);
 	maxAddr = std::min<uint32>(maxAddr, PS2::EE_RAM_SIZE);
 
-	m_virtualMachine.m_ee->m_EE.m_analysis->Clear();
-	m_virtualMachine.m_ee->m_EE.m_analysis->Analyse(minAddr, maxAddr);
+	Debugger::LocalCall(m_virtualMachine, "analysis.run", {{"begin", Debugger::Hex(minAddr)}, {"end", Debugger::Hex(maxAddr)}});
 }
 
 void QtDebugger::FindEeFunctions()
 {
-	if(m_virtualMachine.m_ee->m_os->GetELF() == nullptr) return;
-
-	auto executableRange = m_virtualMachine.m_ee->m_os->GetExecutableRange();
-	uint32 minAddr = executableRange.first;
-	uint32 maxAddr = executableRange.second & ~0x03;
-
-	auto functionsPath = Framework::PathUtils::GetAppResourcesPath() / "ee_functions.xml";
-	auto functionsStream = Framework::CreateInputStdStream(functionsPath.native());
-	auto functionsDocument = Framework::Xml::CParser::ParseDocument(functionsStream);
-	auto functionsNode = functionsDocument->Select("Functions");
-
-	//Check function patterns
-	{
-		CMipsFunctionPatternDb patternDb(functionsNode);
-
-		for(auto patternIterator(std::begin(patternDb.GetPatterns()));
-		    patternIterator != std::end(patternDb.GetPatterns()); ++patternIterator)
-		{
-			auto pattern = *patternIterator;
-			for(uint32 address = minAddr; address <= maxAddr; address += 4)
-			{
-				uint32* text = reinterpret_cast<uint32*>(m_virtualMachine.m_ee->m_ram + address);
-				uint32 textSize = (maxAddr - address);
-				if(pattern.Matches(text, textSize))
-				{
-					m_virtualMachine.m_ee->m_EE.m_Functions.InsertTag(address, pattern.name.c_str());
-					break;
-				}
-			}
-		}
-	}
-
-	//Check function comments
-	{
-		std::map<std::string, std::string> stringFuncs;
-		auto commentNodes = functionsNode->SelectNodes("FunctionComments/FunctionComment");
-		for(const auto& commentNode : commentNodes)
-		{
-			auto comment = Framework::Xml::GetAttributeStringValue(commentNode, "Comment");
-			auto functionName = Framework::Xml::GetAttributeStringValue(commentNode, "Function");
-			stringFuncs.insert(std::make_pair(comment, functionName));
-		}
-
-		//Identify functions that reference special string literals
-		{
-			auto& eeFunctions = m_virtualMachine.m_ee->m_EE.m_Functions;
-			const auto& eeComments = m_virtualMachine.m_ee->m_EE.m_Comments;
-			const auto& eeAnalysis = m_virtualMachine.m_ee->m_EE.m_analysis;
-			for(auto tagIterator = eeComments.GetTagsBegin();
-			    tagIterator != eeComments.GetTagsEnd(); tagIterator++)
-			{
-				const auto& tag = *tagIterator;
-				auto subroutine = eeAnalysis->FindSubroutine(tag.first);
-				if(subroutine == nullptr) continue;
-				auto stringFunc = stringFuncs.find(tag.second);
-				if(stringFunc == std::end(stringFuncs)) continue;
-				eeFunctions.InsertTag(subroutine->start, stringFunc->second.c_str());
-			}
-		}
-	}
-
-	m_virtualMachine.m_ee->m_EE.m_Functions.OnTagListChange();
+	Debugger::LocalCall(m_virtualMachine, "analysis.functions", {});
 }
 
 void QtDebugger::Layout1024x768()

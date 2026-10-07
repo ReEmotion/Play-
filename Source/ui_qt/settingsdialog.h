@@ -27,6 +27,12 @@ public:
 	explicit SettingsDialog(QWidget* parent = 0);
 	~SettingsDialog();
 	void LoadPreferences();
+#ifdef BUILD_REMOTE_DEBUGGER
+	void SetRemoteDebuggerSettings(bool enabled, const QString& endpoint);
+	bool RemoteDebuggerEnabled() const;
+	QString RemoteDebuggerEndpoint() const;
+	bool RemoteDebuggerSettingsChanged() const;
+#endif
 
 private slots:
 	void changePage(QListWidgetItem* current, QListWidgetItem* previous);
@@ -35,6 +41,7 @@ private slots:
 	void on_comboBox_system_language_currentIndexChanged(int index);
 	void on_checkBox_limitFrameRate_clicked(bool checked);
 	void on_checkBox_showEECPUUsage_clicked(bool checked);
+	void on_checkBox_allowBackgroundRun_clicked(bool checked);
 	void on_button_browseArcadeRomsDir_clicked();
 	void on_checkBox_enableArcadeIOServer_clicked(bool checked);
 	void on_lineEdit_arcadeIOServerPort_textChanged(const QString& value);
@@ -55,4 +62,8 @@ private slots:
 
 private:
 	Ui::SettingsDialog* ui;
+#ifdef BUILD_REMOTE_DEBUGGER
+	bool m_remoteEnabled = false;
+	QString m_remoteEndpoint;
+#endif
 };

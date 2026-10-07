@@ -202,6 +202,7 @@ if(TARGET_PLATFORM_WIN32)
 endif()
 	
 if(DEBUGGER_INCLUDED)
+	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../../ee_functions.xml ${CMAKE_CURRENT_BINARY_DIR}/ee_functions.xml COPYONLY)
 	if(NOT TARGET PlayDebugSupport)
 		add_subdirectory(
 			${CMAKE_CURRENT_SOURCE_DIR}/DebugSupport
@@ -250,7 +251,15 @@ set(QT_RESOURCES
 	Qt_ui/resources.qrc
 )
 
+if(BUILD_REMOTE_DEBUGGER)
+	list(APPEND QT_SOURCES RemoteDebugger/RemoteDebuggerServer.cpp RemoteDebugger/RemoteDebuggerServer.h)
+	list(APPEND UI_QT_DEFINITIONS_LIST BUILD_REMOTE_DEBUGGER=1)
+endif()
 set(QT_COMPONENTS Widgets Core)
+if(BUILD_REMOTE_DEBUGGER)
+	list(APPEND QT_COMPONENTS Network)
+	list(APPEND UI_QT_PROJECT_LIBS Qt::Network)
+endif()
 
 find_package(Qt6 COMPONENTS ${QT_COMPONENTS})
 if(NOT Qt6_FOUND)

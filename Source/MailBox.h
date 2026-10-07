@@ -40,6 +40,6 @@ private:
 	typedef std::deque<MESSAGE> FunctionCallQueue;
 
 	FunctionCallQueue m_calls;
-	std::mutex m_callMutex;
+	mutable std::mutex m_callMutex;
 	std::condition_variable m_waitCondition;
 };

@@ -117,7 +117,7 @@
     <addaction name="menuLoad_States"/>
     <addaction name="separator"/>
     <addaction name="actionPause_Resume"/>
-    <addaction name="actionPause_when_focus_is_lost"/>
+    <addaction name="actionAllow_background_run"/>
     <addaction name="actionReset"/>
     <addaction name="separator"/>
     <addaction name="menuResizeWindow"/>
@@ -156,6 +156,9 @@
    <property name="text">
     <string>Settings...</string>
    </property>
+   <property name="shortcut">
+    <string>Ctrl+,</string>
+   </property>
   </action>
   <action name="actionBoot_ELF">
    <property name="text">
@@ -185,12 +188,12 @@
     <string>About...</string>
    </property>
   </action>
-  <action name="actionPause_when_focus_is_lost">
+  <action name="actionAllow_background_run">
    <property name="checkable">
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Pause When Focus Is Lost</string>
+    <string>Allow Background Running</string>
    </property>
   </action>
   <action name="actionReset">

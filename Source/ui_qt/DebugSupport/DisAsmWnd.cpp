@@ -11,6 +11,7 @@
 #include <cmath>
 
 #include "DisAsmWnd.h"
+#include "DebuggerBackend.h"
 #include "ee/VuAnalysis.h"
 #include "DisAsmTableModel.h"
 #include "DisAsmVuTableModel.h"
@@ -224,7 +225,10 @@ void CDisAsmWnd::ShowContextMenu(const QPoint& pos)
 		analyseVuction->setText("Analyse Microprogram");
 		connect(analyseVuction, &QAction::triggered,
 		        [&]() {
-			        CVuAnalysis::Analyse(m_ctx, 0, 0x4000);
+			        std::lock_guard debugLock(m_ctx->m_debugMutex);
+			        if(m_virtualMachine.GetStatus() != CVirtualMachine::PAUSED) return;
+			        auto size = m_disAsmType == CDisAsmTableModel::DISASM_VU && m_ctx->m_pMemoryMap->GetInstructionMap(0)->nEnd < 0x4000 ? 0x1000 : 0x4000;
+			        Debugger::Backend::CpuCall(*m_ctx, "analysis.vu", {{"end", size}});
 			        m_model->Redraw();
 		        });
 		rightClickMenu->addAction(analyseVuction);
@@ -423,10 +427,12 @@ void CDisAsmWnd::EditComment()
 
 	if(!value.isEmpty())
 	{
+		std::lock_guard debugLock(m_ctx->m_debugMutex);
 		m_ctx->m_Comments.InsertTag(m_selected, value.toStdString().c_str());
 	}
 	else
 	{
+		std::lock_guard debugLock(m_ctx->m_debugMutex);
 		m_ctx->m_Comments.RemoveTag(m_selected);
 	}
 	m_ctx->m_Comments.OnTagListChange();
@@ -527,19 +533,23 @@ bool CDisAsmWnd::HistoryHasNext()
 
 uint32 CDisAsmWnd::GetInstruction(uint32 address)
 {
+	if(!m_ctx) return 0;
+	std::lock_guard debugLock(m_ctx->m_debugMutex);
 	uint32 physAddr = m_ctx->m_pAddrTranslator(m_ctx, address);
 	return m_ctx->m_pMemoryMap->GetInstruction(physAddr);
 }
 
 void CDisAsmWnd::ToggleBreakpoint(uint32 address)
 {
+	if(!m_ctx) return;
+	std::lock_guard debugLock(m_ctx->m_debugMutex);
 	if(m_virtualMachine.GetStatus() == CVirtualMachine::RUNNING)
 	{
 		QApplication::beep();
 		return;
 	}
 	uint32 physAddress = m_ctx->m_pAddrTranslator(m_ctx, address);
-	m_ctx->ToggleBreakpoint(physAddress);
+	Debugger::Backend::Breakpoint(*m_ctx, address, !m_ctx->m_breakpoints.count(physAddress));
 	m_model->Redraw(address);
 }
 

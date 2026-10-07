@@ -258,32 +258,60 @@ CVirtualMachine::STATUS CPS2VM::GetStatus() const
 	return m_nStatus;
 }
 
+#ifdef DEBUGGER_INCLUDED
+void CPS2VM::DebugInvoke(std::function<void()> operation, bool wait)
+{
+	m_mailBox.SendCall(operation, wait);
+}
+
+void CPS2VM::DebugControl(const std::string& action, const std::string& cpu)
+{
+	// Called only from DebugInvoke's emulation-thread callback.
+	if(action == "pause")
+	{
+		PauseImpl();
+		OnMachineStateChange();
+		OnRunningStateChange();
+	}
+	else if(action == "continue")
+	{
+		ResumeImpl();
+		OnRunningStateChange();
+	}
+	else if(action == "step")
+	{
+		if(GetStatus() != PAUSED) throw std::runtime_error("Target is running.");
+		m_singleStepEe = cpu == "ee";
+		m_singleStepIop = cpu == "iop";
+		m_singleStepVu0 = cpu == "vu0";
+		m_singleStepVu1 = cpu == "vu1";
+		ResumeImpl();
+	}
+}
+#endif
+
 void CPS2VM::StepEe()
 {
 	if(GetStatus() == RUNNING) return;
-	m_singleStepEe = true;
-	m_mailBox.SendCall(std::bind(&CPS2VM::ResumeImpl, this), true);
+	m_mailBox.SendCall([this] { if(m_nStatus != PAUSED) return; m_singleStepEe = true; ResumeImpl(); }, true);
 }
 
 void CPS2VM::StepIop()
 {
 	if(GetStatus() == RUNNING) return;
-	m_singleStepIop = true;
-	m_mailBox.SendCall(std::bind(&CPS2VM::ResumeImpl, this), true);
+	m_mailBox.SendCall([this] { if(m_nStatus != PAUSED) return; m_singleStepIop = true; ResumeImpl(); }, true);
 }
 
 void CPS2VM::StepVu0()
 {
 	if(GetStatus() == RUNNING) return;
-	m_singleStepVu0 = true;
-	m_mailBox.SendCall(std::bind(&CPS2VM::ResumeImpl, this), true);
+	m_mailBox.SendCall([this] { if(m_nStatus != PAUSED) return; m_singleStepVu0 = true; ResumeImpl(); }, true);
 }
 
 void CPS2VM::StepVu1()
 {
 	if(GetStatus() == RUNNING) return;
-	m_singleStepVu1 = true;
-	m_mailBox.SendCall(std::bind(&CPS2VM::ResumeImpl, this), true);
+	m_mailBox.SendCall([this] { if(m_nStatus != PAUSED) return; m_singleStepVu1 = true; ResumeImpl(); }, true);
 }
 
 void CPS2VM::Resume()
@@ -313,6 +341,10 @@ void CPS2VM::PauseAsync()
 
 void CPS2VM::Reset(uint32 eeRamSize, uint32 iopRamSize)
 {
+#ifdef DEBUGGER_INCLUDED
+	std::scoped_lock debugLock(m_ee->m_EE.m_debugMutex, m_iop->m_cpu.m_debugMutex, m_ee->m_VU0.m_debugMutex, m_ee->m_VU1.m_debugMutex);
+	++m_debugGeneration;
+#endif
 	assert(m_nStatus == PAUSED);
 	BeforeExecutableReloaded = ExecutableReloadedHandler();
 	AfterExecutableReloaded = ExecutableReloadedHandler();
@@ -632,7 +664,10 @@ void CPS2VM::LoadVmTimingState(Framework::CZipArchiveReader& archive)
 
 void CPS2VM::PauseImpl()
 {
-	m_nStatus = PAUSED;
+	auto previous = m_nStatus.exchange(PAUSED);
+#ifdef DEBUGGER_INCLUDED
+	if(previous == RUNNING) OnDebugStopped("pause", "ee", m_ee->m_EE.m_State.nPC);
+#endif
 }
 
 void CPS2VM::ResumeImpl()
@@ -640,6 +675,7 @@ void CPS2VM::ResumeImpl()
 #ifdef DEBUGGER_INCLUDED
 	m_ee->m_EE.m_executor->DisableBreakpointsOnce();
 	m_iop->m_cpu.m_executor->DisableBreakpointsOnce();
+	m_ee->m_VU0.m_executor->DisableBreakpointsOnce();
 	m_ee->m_VU1.m_executor->DisableBreakpointsOnce();
 #endif
 	m_nStatus = RUNNING;
@@ -656,6 +692,9 @@ void CPS2VM::DestroyImpl()
 void CPS2VM::CreateGsHandlerImpl(const CGSHandler::FactoryFunction& factoryFunction)
 {
 	auto gs = m_ee->m_gs;
+#ifdef DEBUGGER_INCLUDED
+	if(gs) ++m_debugGeneration;
+#endif
 	m_ee->m_gs = factoryFunction();
 	m_ee->m_gs->SetIntc(&m_ee->m_intc);
 	m_ee->m_gs->Initialize();
@@ -672,6 +711,9 @@ void CPS2VM::CreateGsHandlerImpl(const CGSHandler::FactoryFunction& factoryFunct
 
 void CPS2VM::DestroyGsHandlerImpl()
 {
+#ifdef DEBUGGER_INCLUDED
+	++m_debugGeneration;
+#endif
 	if(m_ee->m_gs == nullptr) return;
 	m_ee->m_gs->Release();
 	delete m_ee->m_gs;
@@ -740,7 +782,7 @@ void CPS2VM::UpdateEe()
 
 #ifdef DEBUGGER_INCLUDED
 		if(m_singleStepEe || m_singleStepVu0 || m_singleStepVu1) break;
-		if(m_ee->m_EE.m_executor->MustBreak()) break;
+		if(m_ee->m_EE.m_executor->MustBreak() || m_ee->m_VU0.m_executor->MustBreak() || m_ee->m_VU1.m_executor->MustBreak()) break;
 #endif
 	}
 }
@@ -886,6 +928,9 @@ void CPS2VM::ReloadExecutable(const char* executablePath, const CPS2OS::Argument
 
 void CPS2VM::OnExecutableChange()
 {
+#ifdef DEBUGGER_INCLUDED
+	++m_debugGeneration;
+#endif
 	CGameConfig::ApplyGameConfig(*this);
 }
 
@@ -913,6 +958,9 @@ void CPS2VM::EmuThread()
 	{
 		while(m_mailBox.IsPending())
 		{
+#ifdef DEBUGGER_INCLUDED
+			std::scoped_lock debugLock(m_ee->m_EE.m_debugMutex, m_iop->m_cpu.m_debugMutex, m_ee->m_VU0.m_debugMutex, m_ee->m_VU1.m_debugMutex);
+#endif
 			m_mailBox.ReceiveCall();
 		}
 		if(m_nEnd) break;
@@ -922,6 +970,9 @@ void CPS2VM::EmuThread()
 		}
 		if(m_nStatus == RUNNING)
 		{
+#ifdef DEBUGGER_INCLUDED
+			std::scoped_lock debugLock(m_ee->m_EE.m_debugMutex, m_iop->m_cpu.m_debugMutex, m_ee->m_VU0.m_debugMutex, m_ee->m_VU1.m_debugMutex);
+#endif
 			if(m_spuUpdateTicks <= 0)
 			{
 				UpdateSpu();
@@ -994,10 +1045,23 @@ void CPS2VM::EmuThread()
 			if(
 			    m_ee->m_EE.m_executor->MustBreak() ||
 			    m_iop->m_cpu.m_executor->MustBreak() ||
+			    m_ee->m_VU0.m_executor->MustBreak() ||
 			    m_ee->m_VU1.m_executor->MustBreak() ||
 			    m_singleStepEe || m_singleStepIop || m_singleStepVu0 || m_singleStepVu1)
 			{
 				m_nStatus = PAUSED;
+				std::string stoppedCpu = "ee";
+				std::string reason = "breakpoint";
+				if(m_singleStepEe || m_singleStepIop || m_singleStepVu0 || m_singleStepVu1)
+				{
+					reason = "step";
+					stoppedCpu = m_singleStepEe ? "ee" : m_singleStepIop ? "iop" : m_singleStepVu0 ? "vu0" : "vu1";
+				}
+				else if(m_iop->m_cpu.m_executor->MustBreak()) stoppedCpu = "iop";
+				else if(m_ee->m_VU0.m_executor->MustBreak()) stoppedCpu = "vu0";
+				else if(m_ee->m_VU1.m_executor->MustBreak()) stoppedCpu = "vu1";
+				auto pc = stoppedCpu == "ee" ? m_ee->m_EE.m_State.nPC : stoppedCpu == "iop" ? m_iop->m_cpu.m_State.nPC : stoppedCpu == "vu0" ? m_ee->m_VU0.m_State.nPC : m_ee->m_VU1.m_State.nPC;
+				OnDebugStopped(reason, stoppedCpu, pc);
 				m_singleStepEe = false;
 				m_singleStepIop = false;
 				m_singleStepVu0 = false;

@@ -24,6 +24,13 @@ SettingsDialog::SettingsDialog(QWidget* parent)
 	ui->stackedWidget->setCurrentIndex(0);
 
 	ui->lineEdit_arcadeIOServerPort->setValidator(new QIntValidator(0, 65535, this));
+#ifdef BUILD_REMOTE_DEBUGGER
+	connect(ui->checkBox_remoteDebuggerEnabled, &QCheckBox::toggled, ui->remoteDebuggerEndpoint, &QWidget::setEnabled);
+#else
+	delete ui->listWidget->takeItem(3);
+	ui->stackedWidget->removeWidget(ui->RemoteDebugger);
+	ui->RemoteDebugger->hide();
+#endif
 
 	// this assert is to ensure no one adds an item to the combobox through qt creator by accident
 	assert(ui->comboBox_gs_selection->count() == 0);
@@ -64,6 +71,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
 
 	LoadPreferences();
 	connect(ui->listWidget, &QListWidget::currentItemChanged, this, &SettingsDialog::changePage);
+	ui->listWidget->setFocus();
 }
 
 SettingsDialog::~SettingsDialog()
@@ -82,9 +90,14 @@ void SettingsDialog::changePage(QListWidgetItem* current, QListWidgetItem* previ
 
 void SettingsDialog::LoadPreferences()
 {
+#ifdef BUILD_REMOTE_DEBUGGER
+	SetRemoteDebuggerSettings(CAppConfig::GetInstance().GetPreferenceBoolean(PREF_REMOTE_DEBUGGER_ENABLED),
+	    QString::fromUtf8(CAppConfig::GetInstance().GetPreferenceString(PREF_REMOTE_DEBUGGER_ENDPOINT)));
+#endif
 	ui->comboBox_system_language->setCurrentIndex(CAppConfig::GetInstance().GetPreferenceInteger(PREF_SYSTEM_LANGUAGE));
 	ui->checkBox_limitFrameRate->setChecked(CAppConfig::GetInstance().GetPreferenceBoolean(PREF_PS2_LIMIT_FRAMERATE));
 	ui->checkBox_showEECPUUsage->setChecked(CAppConfig::GetInstance().GetPreferenceBoolean(PREF_UI_SHOWEECPUUSAGE));
+	ui->checkBox_allowBackgroundRun->setChecked(CAppConfig::GetInstance().GetPreferenceBoolean(PREF_UI_ALLOWBACKGROUNDRUN));
 	ui->edit_arcadeRoms_dir->setText(PathToQString(CAppConfig::GetInstance().GetPreferencePath(PREF_PS2_ARCADEROMS_DIRECTORY)));
 	ui->checkBox_enableArcadeIOServer->setChecked(CAppConfig::GetInstance().GetPreferenceBoolean(PREF_PS2_ARCADE_IO_SERVER_ENABLED));
 	ui->lineEdit_arcadeIOServerPort->setText(QString::number(CAppConfig::GetInstance().GetPreferenceInteger(PREF_PS2_ARCADE_IO_SERVER_PORT)));
@@ -102,6 +115,39 @@ void SettingsDialog::LoadPreferences()
 	ui->comboBox_presentation_mode->setCurrentIndex(CAppConfig::GetInstance().GetPreferenceInteger(PREF_CGSHANDLER_PRESENTATION_MODE));
 }
 
+#ifdef BUILD_REMOTE_DEBUGGER
+void SettingsDialog::SetRemoteDebuggerSettings(bool enabled, const QString& endpoint)
+{
+	ui->checkBox_remoteDebuggerEnabled->setChecked(enabled);
+	ui->remoteDebuggerEndpoint->setEnabled(enabled);
+	auto host = endpoint.left(endpoint.lastIndexOf(':'));
+	if(host.startsWith('[') && host.endsWith(']')) host = host.mid(1, host.size() - 2);
+	ui->lineEdit_remoteDebuggerAddress->setText(host);
+	bool ok = false;
+	auto port = endpoint.mid(endpoint.lastIndexOf(':') + 1).toInt(&ok);
+	ui->spinBox_remoteDebuggerPort->setValue(ok && port > 0 && port <= 65535 ? port : 28011);
+	m_remoteEnabled = enabled;
+	m_remoteEndpoint = RemoteDebuggerEndpoint();
+}
+
+bool SettingsDialog::RemoteDebuggerEnabled() const
+{
+	return ui->checkBox_remoteDebuggerEnabled->isChecked();
+}
+
+QString SettingsDialog::RemoteDebuggerEndpoint() const
+{
+	auto host = ui->lineEdit_remoteDebuggerAddress->text().trimmed();
+	if(host.contains(':') && !host.startsWith('[')) host = '[' + host + ']';
+	return QString("%1:%2").arg(host).arg(ui->spinBox_remoteDebuggerPort->value());
+}
+
+bool SettingsDialog::RemoteDebuggerSettingsChanged() const
+{
+	return RemoteDebuggerEnabled() != m_remoteEnabled || RemoteDebuggerEndpoint() != m_remoteEndpoint;
+}
+#endif
+
 //General Page ---------------------------------
 
 void SettingsDialog::on_comboBox_system_language_currentIndexChanged(int index)
@@ -117,6 +163,11 @@ void SettingsDialog::on_checkBox_limitFrameRate_clicked(bool checked)
 void SettingsDialog::on_checkBox_showEECPUUsage_clicked(bool checked)
 {
 	CAppConfig::GetInstance().SetPreferenceBoolean(PREF_UI_SHOWEECPUUSAGE, checked);
+}
+
+void SettingsDialog::on_checkBox_allowBackgroundRun_clicked(bool checked)
+{
+	CAppConfig::GetInstance().SetPreferenceBoolean(PREF_UI_ALLOWBACKGROUNDRUN, checked);
 }
 
 void SettingsDialog::on_button_browseArcadeRomsDir_clicked()

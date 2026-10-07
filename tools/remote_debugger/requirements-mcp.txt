@@ -1,0 +1,2 @@
+# Optional MCP adapter only; the debugger SDK and CLI remain standard-library-only.
+mcp>=2.3,<3

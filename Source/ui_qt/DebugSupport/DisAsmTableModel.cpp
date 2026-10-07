@@ -155,6 +155,9 @@ void CDisAsmTableModel::SetWindowCenter(uint32 windowCenter)
 
 QVariant CDisAsmTableModel::data(const QModelIndex& index, int role) const
 {
+	if(!m_ctx) return {};
+	std::unique_lock debugLock(m_ctx->m_debugMutex, std::try_to_lock);
+	if(!debugLock.owns_lock()) return {};
 	// "S", "Address", "R", "I-Mn", "I-Op", "Name",
 	uint32 address = TranslateModelIndexToAddress(index);
 	if(role == Qt::DisplayRole)
@@ -272,6 +275,8 @@ void CDisAsmTableModel::Redraw(uint32 address)
 
 uint32 CDisAsmTableModel::GetInstruction(uint32 address) const
 {
+	if(!m_ctx) return 0;
+	std::lock_guard debugLock(m_ctx->m_debugMutex);
 	address = m_ctx->m_pAddrTranslator(m_ctx, address);
 	return m_ctx->m_pMemoryMap->GetInstruction(address);
 }

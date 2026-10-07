@@ -2,6 +2,7 @@
 
 #include <thread>
 #include <future>
+#include <atomic>
 #include "filesystem_def.h"
 #include "Types.h"
 #include "MIPS.h"
@@ -40,6 +41,14 @@ public:
 	void Initialize();
 	void Destroy();
 
+#ifdef DEBUGGER_INCLUDED
+	// All asynchronous debugger work executes in the same mailbox as VM control.
+	void DebugInvoke(std::function<void()> operation, bool wait = false);
+	void DebugControl(const std::string& action, const std::string& cpu = "ee");
+	uint64 DebugGeneration() const { return m_debugGeneration.load(); }
+	using DebugStoppedEvent = Framework::CSignal<void(std::string, std::string, uint32)>;
+	DebugStoppedEvent OnDebugStopped;
+#endif
 	void StepEe();
 	void StepIop();
 	void StepVu0();
@@ -151,7 +160,10 @@ private:
 	void EmuThread();
 
 	std::thread m_thread;
-	STATUS m_nStatus = PAUSED;
+	std::atomic<STATUS> m_nStatus{PAUSED};
+#ifdef DEBUGGER_INCLUDED
+	std::atomic<uint64> m_debugGeneration{1};
+#endif
 	bool m_nEnd = false;
 
 	uint32 m_eeFreqScaleNumerator = 1;

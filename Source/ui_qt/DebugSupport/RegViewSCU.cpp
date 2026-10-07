@@ -21,6 +21,9 @@ CRegViewSCU::CRegViewSCU(QWidget* parent, CMIPS* ctx)
 
 void CRegViewSCU::Update()
 {
+	if(!m_ctx) return;
+	std::unique_lock debugLock(m_ctx->m_debugMutex, std::try_to_lock);
+	if(!debugLock.owns_lock()) return;
 	const auto& state = m_ctx->m_State;
 
 	for(unsigned int i = 0; i < 32; i++)

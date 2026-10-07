@@ -15,6 +15,14 @@ set(CMAKE_MODULE_PATH
 )
 include(Header)
 
+option(BUILD_REMOTE_DEBUGGER "Build TCP debugger and Python client tests" ON)
+if(BUILD_REMOTE_DEBUGGER)
+	set(DEBUGGER_INCLUDED ON)
+endif()
+if(DEBUGGER_INCLUDED)
+	add_compile_definitions(DEBUGGER_INCLUDED)
+endif()
+
 set(BUILD_PLAY ON CACHE BOOL "Build Play! Emulator")
 set(BUILD_PSFPLAYER OFF CACHE BOOL "Build PsfPlayer")
 set(BUILD_TESTS ON CACHE BOOL "Build Tests")

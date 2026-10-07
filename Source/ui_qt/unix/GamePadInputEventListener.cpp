@@ -49,8 +49,8 @@ void CGamePadInputEventListener::InputDeviceListenerThread()
 
 	auto device = CGamePadUtils::GetDeviceID(dev);
 
-	struct timespec ts;
-	ts.tv_nsec = 5e+8; // 500 millisecond
+	struct timespec ts = {};
+	ts.tv_nsec = 500000000L; // 500 millisecond
 
 	fd_set fds;
 

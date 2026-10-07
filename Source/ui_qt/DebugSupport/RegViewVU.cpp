@@ -43,6 +43,9 @@ CRegViewVU::CRegViewVU(QWidget* parent, CMIPS* ctx)
 
 void CRegViewVU::Update()
 {
+	if(!m_ctx) return;
+	std::unique_lock debugLock(m_ctx->m_debugMutex, std::try_to_lock);
+	if(!debugLock.owns_lock()) return;
 	switch(m_viewMode)
 	{
 	case VIEWMODE_WORD:

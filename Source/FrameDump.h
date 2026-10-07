@@ -77,8 +77,8 @@ public:
 	void SetInitialSMODE2(uint64);
 
 	const PacketArray& GetPackets() const;
-	void AddRegisterPacket(const CGSHandler::RegisterWrite*, uint32, const CGsPacketMetadata*);
-	void AddImagePacket(const uint8*, uint32);
+	bool AddRegisterPacket(const CGSHandler::RegisterWrite*, uint32, const CGsPacketMetadata*);
+	bool AddImagePacket(const uint8*, uint32);
 
 	void Read(Framework::CStream&);
 	void Write(Framework::CStream&) const;
@@ -87,6 +87,7 @@ public:
 	const DrawingKickInfoMap& GetDrawingKicks() const;
 
 private:
+	uint64 m_storageBytes = 0;
 	uint8* m_initialGsRam = nullptr;
 	uint64 m_initialGsRegisters[CGSHandler::REGISTER_MAX];
 	uint64 m_initialSMODE2 = 0;

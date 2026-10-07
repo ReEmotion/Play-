@@ -122,45 +122,10 @@ void QtFramedebugger::showEvent(QShowEvent* event)
 
 void QtFramedebugger::CreateGsHandler()
 {
-	assert(!m_gs);
-
-	uint32 gsHandlerId = CAppConfig::GetInstance().GetPreferenceInteger(PREF_FRAMEDEBUGGER_GS_HANDLER);
-	switch(gsHandlerId)
-	{
-	default:
-		assert(false);
-		[[fallthrough]];
-	case GS_HANDLERS::OPENGL:
-	{
-		m_offscreenSurface = new QOffscreenSurface(nullptr);
-		m_offscreenSurface->setFormat(OpenGLWindow::GetSurfaceFormat());
-		m_offscreenSurface->create();
-		m_gs = std::make_unique<CGSH_OpenGLQt>(m_offscreenSurface);
-	}
-	break;
-#if HAS_GSH_VULKAN
-	case GS_HANDLERS::VULKAN:
-		m_gs = std::make_unique<CGSH_VulkanOffscreen>();
-		break;
-#endif
-	}
-	m_gs->SetLoggingEnabled(false);
-	m_gs->Initialize();
-	m_gs->Reset();
+	m_replay.Create(CAppConfig::GetInstance().GetPreferenceInteger(PREF_FRAMEDEBUGGER_GS_HANDLER) != GS_HANDLERS::OPENGL);
 }
 
-void QtFramedebugger::ReleaseGsHandler()
-{
-	if(m_offscreenSurface)
-	{
-		m_offscreenSurface->destroy();
-		delete m_offscreenSurface;
-		m_offscreenSurface = nullptr;
-	}
-
-	m_gs->Release();
-	m_gs.reset();
-}
+void QtFramedebugger::ReleaseGsHandler() { m_replay.Release(); }
 
 void QtFramedebugger::LoadFrameDump(fs::path dumpPath)
 {
@@ -169,6 +134,7 @@ void QtFramedebugger::LoadFrameDump(fs::path dumpPath)
 		auto inputStream = Framework::CreateInputStdStream(dumpPath.native());
 		m_frameDump.Read(inputStream);
 		m_frameDump.IdentifyDrawingKicks();
+		m_replay.loaded = true;
 	}
 	catch(const std::exception& exception)
 	{
@@ -200,56 +166,7 @@ void QtFramedebugger::ReleaseTreeViewModel()
 
 void QtFramedebugger::UpdateDisplay(int32 targetCmdIndex)
 {
-	m_gs->Reset();
-	m_gs->InitFromFrameDump(&m_frameDump);
-
-	int32 cmdIndex = 0;
-	for(const auto& packet : m_frameDump.GetPackets())
-	{
-		if((cmdIndex - 1) >= targetCmdIndex) break;
-
-		m_currentMetadata = packet.metadata;
-
-		if(packet.registerWrites.empty())
-		{
-			m_gs->ProcessWriteBuffer(nullptr);
-			m_gs->FeedImageData(packet.imageData.data(), packet.imageData.size());
-		}
-		else
-		{
-			for(const auto& registerWrite : packet.registerWrites)
-			{
-				if((cmdIndex - 1) >= targetCmdIndex) break;
-				m_gs->WriteRegister(registerWrite);
-				cmdIndex++;
-			}
-		}
-	}
-
-	m_gs->ProcessWriteBuffer(nullptr);
-	m_gs->Finish(true);
-
-	const auto& drawingKicks = m_frameDump.GetDrawingKicks();
-	if(!drawingKicks.empty())
-	{
-		auto prevKickIndexIterator = drawingKicks.lower_bound(targetCmdIndex);
-		if((prevKickIndexIterator == std::end(drawingKicks)) || (prevKickIndexIterator->first != targetCmdIndex))
-		{
-			prevKickIndexIterator = std::prev(prevKickIndexIterator);
-		}
-		if(prevKickIndexIterator != std::end(drawingKicks))
-		{
-			m_currentDrawingKick = prevKickIndexIterator->second;
-		}
-		else
-		{
-			m_currentDrawingKick = DRAWINGKICK_INFO();
-		}
-	}
-	else
-	{
-		m_currentDrawingKick = DRAWINGKICK_INFO();
-	}
+	m_replay.Replay(targetCmdIndex);
 	UpdateCurrentTab();
 }
 
@@ -336,7 +253,9 @@ void QtFramedebugger::on_prevKickbutton_clicked()
 	}
 
 	const auto& drawingKicks = m_frameDump.GetDrawingKicks();
-	auto prevKickIndexIterator = std::prev(drawingKicks.lower_bound(selectedItemIndex));
+	auto lower = drawingKicks.lower_bound(selectedItemIndex);
+	if(lower == drawingKicks.begin()) return;
+	auto prevKickIndexIterator = std::prev(lower);
 	if(prevKickIndexIterator == std::end(drawingKicks))
 	{
 		//Nothing to do here

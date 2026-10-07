@@ -30,6 +30,9 @@ CRegViewFPU::CRegViewFPU(QWidget* parent, CMIPS* pC)
 
 void CRegViewFPU::Update()
 {
+	if(!m_pCtx) return;
+	std::unique_lock debugLock(m_pCtx->m_debugMutex, std::try_to_lock);
+	if(!debugLock.owns_lock()) return;
 	switch(m_nViewMode)
 	{
 	case VIEWMODE_WORD:

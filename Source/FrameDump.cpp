@@ -26,6 +26,7 @@ CFrameDump::~CFrameDump()
 void CFrameDump::Reset()
 {
 	m_packets.clear();
+	m_storageBytes = CGSHandler::RAMSIZE + sizeof(m_initialGsRegisters);
 	memset(m_initialGsRam, 0, CGSHandler::RAMSIZE);
 	memset(&m_initialGsRegisters, 0, sizeof(m_initialGsRegisters));
 	m_initialSMODE2 = 0;
@@ -56,22 +57,30 @@ const CFrameDump::PacketArray& CFrameDump::GetPackets() const
 	return m_packets;
 }
 
-void CFrameDump::AddRegisterPacket(const CGSHandler::RegisterWrite* registerWrites, uint32 count, const CGsPacketMetadata* metadata)
+bool CFrameDump::AddRegisterPacket(const CGSHandler::RegisterWrite* registerWrites, uint32 count, const CGsPacketMetadata* metadata)
 {
+	auto bytes = sizeof(CGsPacket) + uint64(count) * sizeof(CGSHandler::RegisterWrite);
+	if(m_storageBytes + bytes > 64 * 1024 * 1024 || m_packets.size() >= 65536) return false;
+	m_storageBytes += bytes;
 	CGsPacket packet;
 	packet.registerWrites = CGsPacket::RegisterWriteArray(registerWrites, registerWrites + count);
 	if(metadata)
 	{
 		packet.metadata = *metadata;
 	}
-	m_packets.push_back(packet);
+	m_packets.push_back(std::move(packet));
+	return true;
 }
 
-void CFrameDump::AddImagePacket(const uint8* imageData, uint32 size)
+bool CFrameDump::AddImagePacket(const uint8* imageData, uint32 size)
 {
+	auto bytes = sizeof(CGsPacket) + uint64(size);
+	if(m_storageBytes + bytes > 64 * 1024 * 1024 || m_packets.size() >= 65536) return false;
+	m_storageBytes += bytes;
 	CGsPacket packet;
 	packet.imageData = CGsPacket::ImageDataArray(imageData, imageData + size);
-	m_packets.push_back(packet);
+	m_packets.push_back(std::move(packet));
+	return true;
 }
 
 void CFrameDump::Read(Framework::CStream& input)
@@ -79,6 +88,19 @@ void CFrameDump::Read(Framework::CStream& input)
 	Reset();
 
 	Framework::CZipArchiveReader archive(input);
+	uint64 uncompressed = 0;
+	if(archive.GetFileHeaders().size() > 196611) throw std::runtime_error("Frame dump has too many entries.");
+	for(const auto& entry : archive.GetFileHeaders())
+	{
+		uncompressed += entry.second.uncompressedSize;
+		if(uncompressed > 64 * 1024 * 1024) throw std::runtime_error("Frame dump exceeds 64 MiB uncompressed limit.");
+	}
+	auto checkSize = [&](const char* name, uint64 expected) {
+		auto header = archive.GetFileHeader(name);
+		if(!header || header->uncompressedSize != expected) throw std::runtime_error("Missing or invalid frame dump state entry.");
+	};
+	checkSize(STATE_INITIAL_GSRAM, CGSHandler::RAMSIZE);
+	checkSize(STATE_INITIAL_GSREGS, sizeof(m_initialGsRegisters));
 
 	archive.BeginReadFile(STATE_INITIAL_GSRAM)->Read(m_initialGsRam, CGSHandler::RAMSIZE);
 	archive.BeginReadFile(STATE_INITIAL_GSREGS)->Read(m_initialGsRegisters, sizeof(uint64) * CGSHandler::REGISTER_MAX);
@@ -94,8 +116,8 @@ void CFrameDump::Read(Framework::CStream& input)
 		if(fileHeader.first.find(STATE_PACKET_METADATA_PREFIX) == 0)
 		{
 			unsigned int packetIdx = 0;
-			FRAMEWORK_MAYBE_UNUSED int scanCount = sscanf(fileHeader.first.c_str(), STATE_PACKET_METADATA_PREFIX "%d", &packetIdx);
-			assert(scanCount == 1);
+			FRAMEWORK_MAYBE_UNUSED int scanCount = sscanf(fileHeader.first.c_str(), STATE_PACKET_METADATA_PREFIX "%u", &packetIdx);
+			if(scanCount != 1) throw std::runtime_error("Invalid packet metadata filename.");
 			packetFiles[packetIdx] = fileHeader.first;
 		}
 	}
@@ -109,15 +131,18 @@ void CFrameDump::Read(Framework::CStream& input)
 		CGsPacket packet;
 
 		//Read metadata (mandatory)
-		archive.BeginReadFile(packetMetadataFileName.c_str())->Read(&packet.metadata, sizeof(CGsPacketMetadata));
+		checkSize(packetMetadataFileName.c_str(), sizeof(CGsPacketMetadata));
+		if(archive.BeginReadFile(packetMetadataFileName.c_str())->Read(&packet.metadata, sizeof(CGsPacketMetadata)) != sizeof(CGsPacketMetadata)) throw std::runtime_error("Truncated packet metadata.");
 
 		//Read register writes
 		if(const auto& packetRegisterWritesFileHeader = archive.GetFileHeader(packetRegisterWritesFileName.c_str()))
 		{
 			unsigned int writeCount = packetRegisterWritesFileHeader->uncompressedSize / sizeof(CGSHandler::RegisterWrite);
-			assert(packetRegisterWritesFileHeader->uncompressedSize % sizeof(CGSHandler::RegisterWrite) == 0);
+			if(packetRegisterWritesFileHeader->uncompressedSize % sizeof(CGSHandler::RegisterWrite)) throw std::runtime_error("Invalid register write entry size.");
 			packet.registerWrites.resize(writeCount);
-			archive.BeginReadFile(packetRegisterWritesFileName.c_str())->Read(packet.registerWrites.data(), packet.registerWrites.size() * sizeof(CGSHandler::RegisterWrite));
+			auto size = packet.registerWrites.size() * sizeof(CGSHandler::RegisterWrite);
+			if(archive.BeginReadFile(packetRegisterWritesFileName.c_str())->Read(packet.registerWrites.data(), size) != size) throw std::runtime_error("Truncated register writes.");
+			for(const auto& write : packet.registerWrites) if(write.first >= CGSHandler::REGISTER_MAX) throw std::runtime_error("Invalid GS register number.");
 		}
 
 		//Read image data

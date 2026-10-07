@@ -1,4 +1,5 @@
 #include "GsStateUtils.h"
+#include <cstring>
 #include "string_format.h"
 #include "gs/GsDebuggerInterface.h"
 

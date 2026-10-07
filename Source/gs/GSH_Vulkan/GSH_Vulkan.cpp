@@ -1684,7 +1684,17 @@ uint8* CGSH_Vulkan::GetRam() const
 
 Framework::CBitmap CGSH_Vulkan::GetScreenshot()
 {
-	return Framework::CBitmap();
+	SyncMemoryCache();
+	return ComposeScreenshot([this](const DISPLAY_INFO::LAYER& layer) {
+		switch(layer.psm)
+		{
+		case PSMCT32: return ReadImage32<CGsPixelFormats::CPixelIndexorPSMCT32>(GetRam(), layer.bufPtr, layer.bufWidth / 64, layer.width, layer.height);
+		case PSMCT24: return ReadImage32<CGsPixelFormats::CPixelIndexorPSMCT32, 0x00FFFFFF>(GetRam(), layer.bufPtr, layer.bufWidth / 64, layer.width, layer.height);
+		case PSMCT16: return ReadImage16<CGsPixelFormats::CPixelIndexorPSMCT16>(GetRam(), layer.bufPtr, layer.bufWidth / 64, layer.width, layer.height);
+		case PSMCT16S: return ReadImage16<CGsPixelFormats::CPixelIndexorPSMCT16S>(GetRam(), layer.bufPtr, layer.bufWidth / 64, layer.width, layer.height);
+		default: return Framework::CBitmap();
+		}
+	}, 1);
 }
 
 bool CGSH_Vulkan::GetDepthTestingEnabled() const

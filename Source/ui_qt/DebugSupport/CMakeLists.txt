@@ -48,6 +48,10 @@ list(APPEND PLAYDEBUGSUPPORT_LIBS Qt::Core Qt::Widgets)
 
 set(SRC_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 set(SRC_FILES
+	${SRC_ROOT}/FrameDebugger/FrameReplaySession.cpp
+	${SRC_ROOT}/FrameDebugger/FrameReplaySession.h
+	${SRC_ROOT}/DebuggerBackend.cpp
+	${SRC_ROOT}/DebuggerBackend.h
 	${SRC_ROOT}/CallStackWnd.cpp
 	${SRC_ROOT}/CallStackWnd.h
 	${SRC_ROOT}/DebugExpressionEvaluator.cpp
@@ -194,4 +198,11 @@ if(TARGET_PLATFORM_WIN32)
 									 --no-compiler-runtime
 									 "$<TARGET_FILE:PlayDebugSupportTests>"
 	)
+endif()
+
+if(BUILD_REMOTE_DEBUGGER AND BUILD_TESTS)
+	find_package(Python3 COMPONENTS Interpreter REQUIRED)
+	add_test(NAME RemoteDebuggerClientTests COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/remote_debugger/tests -p test_client.py)
+	add_executable(RemoteDebuggerFixture ${CMAKE_SOURCE_DIR}/tools/remote_debugger/tests/make_replay_fixture.cpp)
+	target_link_libraries(RemoteDebuggerFixture PlayCore)
 endif()

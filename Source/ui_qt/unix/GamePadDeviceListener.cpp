@@ -24,8 +24,9 @@ CGamePadDeviceListener::CGamePadDeviceListener(OnInputEvent OnInputEventCallBack
 CGamePadDeviceListener::~CGamePadDeviceListener()
 {
 	m_running = false;
-	m_GPIEList.clear();
 	m_thread.join();
+	m_connectionlist.clear();
+	m_GPIEList.clear();
 }
 
 void CGamePadDeviceListener::UpdateOnInputEventCallback(CGamePadDeviceListener::OnInputEvent OnInputEventFunction)
@@ -98,8 +99,8 @@ void CGamePadDeviceListener::InputDeviceListenerThread()
 		return;
 	}
 
-	struct timespec ts;
-	ts.tv_nsec = 5e+8; // 500 millisecond
+	struct timespec ts = {};
+	ts.tv_nsec = 500000000L; // 500 millisecond
 
 	fd_set fds;
 

@@ -29,6 +29,9 @@ CRegViewGeneral::CRegViewGeneral(QWidget* hParent, CMIPS* pC)
 
 void CRegViewGeneral::Update()
 {
+	if(!m_pCtx) return;
+	std::unique_lock debugLock(m_pCtx->m_debugMutex, std::try_to_lock);
+	if(!debugLock.owns_lock()) return;
 	MIPSSTATE* s = &m_pCtx->m_State;
 
 	for(unsigned int i = 0; i < 32; i++)

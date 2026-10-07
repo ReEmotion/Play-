@@ -4,6 +4,7 @@
         <file>assets/general.png</file>
         <file>assets/video.png</file>
         <file>assets/music.png</file>
+        <file>assets/remote_debugger.png</file>
         <file>assets/boxart.png</file>
     </qresource>
 </RCC>

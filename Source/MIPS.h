@@ -9,6 +9,7 @@
 #include "MIPSTags.h"
 #include "uint128.h"
 #include <set>
+#include <mutex>
 
 struct REGISTER_PIPELINE
 {
@@ -166,6 +167,9 @@ public:
 
 	void MapPages(uint32, uint32, uint8*);
 
+#ifdef DEBUGGER_INCLUDED
+	mutable std::recursive_mutex m_debugMutex;
+#endif
 	MIPSSTATE m_State;
 
 	void* m_vuMem = nullptr;

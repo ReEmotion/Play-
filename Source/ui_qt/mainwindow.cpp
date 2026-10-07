@@ -1,3 +1,6 @@
+#ifdef BUILD_REMOTE_DEBUGGER
+#include "RemoteDebugger/RemoteDebuggerServer.h"
+#endif
 #include "mainwindow.h"
 #include "QStringUtils.h"
 #include "settingsdialog.h"
@@ -30,6 +33,7 @@
 #include <QtGlobal>
 #include <QCheckBox>
 #include <QShortcut>
+#include <QApplication>
 
 #include "StdStreamUtils.h"
 #include "string_format.h"
@@ -95,7 +99,7 @@ MainWindow::MainWindow(QWidget* parent)
 	}
 #endif
 
-	m_pauseFocusLost = CAppConfig::GetInstance().GetPreferenceBoolean(PREF_UI_PAUSEWHENFOCUSLOST);
+	m_allowBackgroundRun = CAppConfig::GetInstance().GetPreferenceBoolean(PREF_UI_ALLOWBACKGROUNDRUN);
 	auto lastPath = CAppConfig::GetInstance().GetPreferencePath(PREF_PS2_CDROM0_PATH);
 	std::error_code lastPathExistsErrorCode;
 	if(fs::exists(lastPath, lastPathExistsErrorCode))
@@ -128,13 +132,24 @@ MainWindow::MainWindow(QWidget* parent)
 	SetupDebugger();
 
 	m_onRunningStateChangeConnection = m_virtualMachine->OnRunningStateChange.Connect([&] {
-		if(m_virtualMachine->GetStatus() == CVirtualMachine::RUNNING)
-			ui->stackedWidget->setCurrentIndex(1);
+		QMetaObject::invokeMethod(this, [this] {
+			if(m_virtualMachine && m_virtualMachine->GetStatus() == CVirtualMachine::RUNNING)
+				ui->stackedWidget->setCurrentIndex(1);
+		}, Qt::QueuedConnection);
+	});
+	connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+		if(state == Qt::ApplicationActive) focusInEvent(nullptr);
+		else focusOutEvent(nullptr);
 	});
 }
 
 MainWindow::~MainWindow()
 {
+	m_closing = true;
+	m_deactivatePause = false;
+#ifdef BUILD_REMOTE_DEBUGGER
+	m_remoteDebugger.reset();
+#endif
 #ifdef DEBUGGER_INCLUDED
 	m_debugger.reset();
 	m_frameDebugger.reset();
@@ -241,6 +256,11 @@ void MainWindow::SetupGsHandler()
 		delete oldContainer;
 	}
 
+#ifdef DEBUGGER_INCLUDED
+	m_frameDumpFailureConnection = m_virtualMachine->GetGSHandler()->OnFrameDumpFailure.Connect([this](uint64 owner, std::string message) {
+		if(owner == 0) QMetaObject::invokeMethod(this, [this, message] { if(!m_closing) m_msgLabel->setText(QString::fromStdString(message)); }, Qt::QueuedConnection);
+	});
+#endif
 	connect(m_outputwindow, SIGNAL(heightChanged(int)), this, SLOT(outputWindow_resized()));
 	connect(m_outputwindow, SIGNAL(widthChanged(int)), this, SLOT(outputWindow_resized()));
 
@@ -611,8 +631,33 @@ void MainWindow::updateStats()
 void MainWindow::on_actionSettings_triggered()
 {
 	auto gs_index = CAppConfig::GetInstance().GetPreferenceInteger(PREF_VIDEO_GS_HANDLER);
-	SettingsDialog sd;
+	SettingsDialog sd(this);
+#ifdef BUILD_REMOTE_DEBUGGER
+	sd.SetRemoteDebuggerSettings(m_remoteDebugEnabled, m_remoteDebugEnabled ? m_remoteDebugEndpoint :
+	    QString::fromUtf8(CAppConfig::GetInstance().GetPreferenceString(PREF_REMOTE_DEBUGGER_ENDPOINT)));
+#endif
 	sd.exec();
+	auto allowBackgroundRun = CAppConfig::GetInstance().GetPreferenceBoolean(PREF_UI_ALLOWBACKGROUNDRUN);
+	if(allowBackgroundRun != m_allowBackgroundRun) m_deactivatePause = false;
+	m_allowBackgroundRun = allowBackgroundRun;
+	ui->actionAllow_background_run->setChecked(m_allowBackgroundRun);
+#ifdef BUILD_REMOTE_DEBUGGER
+	if(sd.RemoteDebuggerSettingsChanged())
+	{
+		try
+		{
+			if(sd.RemoteDebuggerEnabled()) StartRemoteDebugger(sd.RemoteDebuggerEndpoint());
+			else StopRemoteDebugger();
+			CAppConfig::GetInstance().SetPreferenceBoolean(PREF_REMOTE_DEBUGGER_ENABLED, sd.RemoteDebuggerEnabled());
+			CAppConfig::GetInstance().SetPreferenceString(PREF_REMOTE_DEBUGGER_ENDPOINT, sd.RemoteDebuggerEndpoint().toStdString().c_str());
+			CAppConfig::GetInstance().Save();
+		}
+		catch(const std::exception& e)
+		{
+			QMessageBox::warning(this, tr("Remote Debugger"), QString::fromUtf8(e.what()));
+		}
+	}
+#endif
 	SetupSoundHandler();
 	if(m_virtualMachine != nullptr)
 	{
@@ -794,6 +839,8 @@ void MainWindow::closeEvent(QCloseEvent* event)
 	}
 	else
 	{
+		m_closing = true;
+		m_deactivatePause = false;
 		event->accept();
 #ifdef DEBUGGER_INCLUDED
 		m_debugger->close();
@@ -850,7 +897,7 @@ bool MainWindow::IsExecutableLoaded() const
 
 void MainWindow::UpdateUI()
 {
-	ui->actionPause_when_focus_is_lost->setChecked(m_pauseFocusLost);
+	ui->actionAllow_background_run->setChecked(m_allowBackgroundRun);
 	ui->actionReset->setEnabled(!m_lastOpenCommand.path.empty());
 	ui->actionPause_Resume->setEnabled(IsExecutableLoaded());
 	SetOutputWindowSize();
@@ -867,38 +914,73 @@ void MainWindow::RegisterPreferences()
 {
 	CAppConfig::GetInstance().RegisterPreferenceBoolean(PREFERENCE_AUDIO_ENABLEOUTPUT, true);
 	CAppConfig::GetInstance().RegisterPreferenceBoolean(PREF_UI_PAUSEWHENFOCUSLOST, true);
+	CAppConfig::GetInstance().RegisterPreferenceBoolean(PREF_UI_ALLOWBACKGROUNDRUN, true);
 	CAppConfig::GetInstance().RegisterPreferenceBoolean(PREF_UI_SHOWEECPUUSAGE, false);
 	CAppConfig::GetInstance().RegisterPreferenceBoolean(PREF_UI_SHOWEXITCONFIRMATION, true);
 	CAppConfig::GetInstance().RegisterPreferenceInteger(PREF_VIDEO_GS_HANDLER, SettingsDialog::GS_HANDLERS::OPENGL);
 	CAppConfig::GetInstance().RegisterPreferenceString(PREF_INPUT_PAD1_PROFILE, "default");
+#ifdef BUILD_REMOTE_DEBUGGER
+	CAppConfig::GetInstance().RegisterPreferenceBoolean(PREF_REMOTE_DEBUGGER_ENABLED, true);
+	CAppConfig::GetInstance().RegisterPreferenceString(PREF_REMOTE_DEBUGGER_ENDPOINT, "127.0.0.1:28011");
+#endif
 }
 
-void MainWindow::focusOutEvent(QFocusEvent* event)
+#ifdef BUILD_REMOTE_DEBUGGER
+void MainWindow::StartRemoteDebugger(const QString& endpoint)
 {
-	if(m_pauseFocusLost && m_virtualMachine->GetStatus() == CVirtualMachine::RUNNING)
+	auto address = endpoint.trimmed();
+	if(m_remoteDebugger && address == m_remoteDebugEndpoint) return;
+	// Bind before replacing the listener so a failed change preserves the session.
+	auto server = std::make_unique<RemoteDebuggerServer>(*m_virtualMachine, this);
+	server->Listen(address);
+	m_remoteDebugger = std::move(server);
+	m_remoteDebugEndpoint = address;
+	m_remoteDebugEnabled = true;
+	m_deactivatePause = false;
+	statusBar()->showMessage(tr("Remote debugger: %1").arg(address));
+}
+
+void MainWindow::StartRemoteDebuggerFromPreferences()
+{
+	auto& config = CAppConfig::GetInstance();
+	if(config.GetPreferenceBoolean(PREF_REMOTE_DEBUGGER_ENABLED))
+		StartRemoteDebugger(QString::fromUtf8(config.GetPreferenceString(PREF_REMOTE_DEBUGGER_ENDPOINT)));
+	else
+		StopRemoteDebugger();
+}
+
+void MainWindow::StopRemoteDebugger()
+{
+	if(!m_remoteDebugger) return;
+	m_remoteDebugger.reset();
+	m_remoteDebugEndpoint.clear();
+	m_remoteDebugEnabled = false;
+	m_deactivatePause = false;
+	statusBar()->showMessage(tr("Remote debugger disabled"));
+}
+#endif
+
+void MainWindow::focusOutEvent(QFocusEvent*)
+{
+	if(!m_virtualMachine || m_closing || m_allowBackgroundRun) return;
+	if(m_virtualMachine->GetStatus() == CVirtualMachine::RUNNING &&
+	   (qApp->applicationState() != Qt::ApplicationActive ||
+	    (!isActiveWindow() && (!m_outputwindow || !m_outputwindow->isActive()))))
 	{
-		if(!isActiveWindow() && !m_outputwindow->isActive())
-		{
-			if(m_virtualMachine != nullptr)
-			{
-				m_virtualMachine->Pause();
-				m_deactivatePause = true;
-			}
-		}
+		m_virtualMachine->Pause();
+		m_deactivatePause = true;
 	}
 }
-void MainWindow::focusInEvent(QFocusEvent* event)
+
+void MainWindow::focusInEvent(QFocusEvent*)
 {
-	if(m_pauseFocusLost && m_virtualMachine->GetStatus() == CVirtualMachine::PAUSED)
+	if(!m_virtualMachine || m_closing || m_allowBackgroundRun) return;
+	if(m_deactivatePause && m_virtualMachine->GetStatus() == CVirtualMachine::PAUSED &&
+	   (qApp->applicationState() == Qt::ApplicationActive || isActiveWindow() ||
+	    (m_outputwindow && m_outputwindow->isActive())))
 	{
-		if(m_deactivatePause && (isActiveWindow() || m_outputwindow->isActive()))
-		{
-			if(m_virtualMachine != nullptr)
-			{
-				m_virtualMachine->Resume();
-				m_deactivatePause = false;
-			}
-		}
+		m_deactivatePause = false;
+		m_virtualMachine->Resume();
 	}
 }
 
@@ -1102,10 +1184,12 @@ void MainWindow::ToggleGsDraw()
 
 #endif
 
-void MainWindow::on_actionPause_when_focus_is_lost_triggered(bool checked)
+void MainWindow::on_actionAllow_background_run_triggered(bool checked)
 {
-	m_pauseFocusLost = checked;
-	CAppConfig::GetInstance().SetPreferenceBoolean(PREF_UI_PAUSEWHENFOCUSLOST, m_pauseFocusLost);
+	m_allowBackgroundRun = checked;
+	m_deactivatePause = false;
+	CAppConfig::GetInstance().SetPreferenceBoolean(PREF_UI_ALLOWBACKGROUNDRUN, checked);
+	CAppConfig::GetInstance().Save();
 }
 
 void MainWindow::on_actionReset_triggered()

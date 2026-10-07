@@ -40,11 +40,14 @@ private:
 	Framework::CBitmap PostProcessRenderbuffer(Framework::CBitmap, float);
 	void RenderDrawKick(Framework::CBitmap&);
 
+public:
+	static void DrawKick(Framework::CBitmap&, const DRAWINGKICK_INFO&, unsigned context, int scale);
 	static uint32 Color_Ps2ToRGBA(uint32);
 	static void BrightenBitmap(Framework::CBitmap&);
 	static Framework::CBitmap LookupBitmap(const Framework::CBitmap&, const ColorArray&);
 	static Framework::CBitmap ExtractAlpha32(const Framework::CBitmap&);
 
+private:
 	unsigned int m_contextId = 0;
 	std::unique_ptr<CPixelBufferView> m_bufferView;
 	const GsHandlerPtr& m_gs;

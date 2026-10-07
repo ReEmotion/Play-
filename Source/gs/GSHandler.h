@@ -5,6 +5,7 @@
 #include <functional>
 #include <atomic>
 #include <array>
+#include <map>
 #include "signal/Signal.h"
 
 #include "bitmap/Bitmap.h"
@@ -829,11 +830,31 @@ public:
 	virtual void SetPresentationParams(const PRESENTATION_PARAMS&);
 	PRESENTATION_VIEWPORT GetPresentationViewport() const;
 
+	Framework::CBitmap ComposeScreenshot(const std::function<Framework::CBitmap(const DISPLAY_INFO::LAYER&)>&, unsigned scale);
+
 	virtual void SaveState(Framework::CZipArchiveWriter&);
 	virtual void LoadState(Framework::CZipArchiveReader&);
 	void Copy(CGSHandler*);
 
 	void TriggerFrameDump(const FrameDumpCallback&);
+#ifdef DEBUGGER_INCLUDED
+	// Called on GS thread. Ownership prevents remote cancellation of local captures.
+	bool ArmFrameDump(uint64 owner, const FrameDumpCallback&);
+	void CancelFrameDump(uint64 owner);
+	using FrameDumpFailureEvent = Framework::CSignal<void(uint64, std::string)>;
+	FrameDumpFailureEvent OnFrameDumpFailure;
+	void FailFrameDump(const char* message);
+	struct DebugState
+	{
+		std::array<uint64, REGISTER_MAX> registers;
+		std::map<std::string, uint64> privateRegisters, delayedRegisters;
+		uint32 transferSize, transferRealSize, transferX, transferY;
+		bool transferDirty;
+		std::vector<uint8> ram;
+	};
+	// Called on the GS thread while the VM is paused and its mailbox is pinned.
+	DebugState GetDebugState(bool includeRam);
+#endif
 
 	void InitFromFrameDump(CFrameDump*);
 
@@ -1131,6 +1152,9 @@ protected:
 	bool m_threadDone = false;
 	std::unique_ptr<CFrameDump> m_frameDump;
 	FrameDumpCallback m_frameDumpCallback;
+	std::atomic<uint64> m_frameDumpOwner{0};
+	std::atomic<bool> m_frameDumpRequested{false};
+	std::atomic<uint64> m_pendingDumpBytes{0};
 	bool m_regsDirty = false;
 	bool m_drawEnabled = true;
 	CINTC* m_intc = nullptr;

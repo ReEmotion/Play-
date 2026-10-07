@@ -43,6 +43,9 @@ void CTagsView::Refresh()
 
 void CTagsView::RefreshList()
 {
+	if(!m_context) return;
+	std::unique_lock debugLock(m_context->m_debugMutex, std::try_to_lock);
+	if(!debugLock.owns_lock()) return;
 	m_globalItem.reset();
 	m_moduleItems.clear();
 	ui->treeWidget->clear();
@@ -123,7 +126,7 @@ void CTagsView::SetContext(CMIPS* context, CMIPSTags* tags, CBiosDebugInfoProvid
 	m_context = context;
 	m_biosDebugInfoProvider = biosDebugInfoProvider;
 	m_tags = tags;
-	m_tagsChangeConnection = m_tags->OnTagListChange.Connect(std::bind(&CTagsView::OnTagListChange, this));
+	m_tagsChangeConnection = m_tags->OnTagListChange.Connect([this] { QMetaObject::invokeMethod(this, [this] { OnTagListChange(); }, Qt::QueuedConnection); });
 
 	ui->filterEdit->setText(QString());
 
@@ -174,7 +177,7 @@ void CTagsView::OnNewClick()
 		}
 	}
 
-	m_tags->InsertTag(nAddress, name.c_str());
+	{ std::lock_guard debugLock(m_context->m_debugMutex); m_tags->InsertTag(nAddress, name.c_str()); }
 
 	RefreshList();
 	OnStateChange();
@@ -205,7 +208,7 @@ void CTagsView::OnRenameClick()
 	if(!ok || res.isEmpty())
 		return;
 
-	m_tags->InsertTag(nAddress, res.toStdString().c_str());
+	{ std::lock_guard debugLock(m_context->m_debugMutex); m_tags->InsertTag(nAddress, res.toStdString().c_str()); }
 	RefreshList();
 
 	OnStateChange();
@@ -249,7 +252,7 @@ void CTagsView::OnDeleteClick()
 
 		for(auto address : toDelete)
 		{
-			m_tags->RemoveTag(address);
+			{ std::lock_guard debugLock(m_context->m_debugMutex); m_tags->RemoveTag(address); }
 		}
 	}
 	else
@@ -265,7 +268,7 @@ void CTagsView::OnDeleteClick()
 			return;
 		}
 
-		m_tags->RemoveTag(nAddress);
+		{ std::lock_guard debugLock(m_context->m_debugMutex); m_tags->RemoveTag(nAddress); }
 	}
 
 	RefreshList();

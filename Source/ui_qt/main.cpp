@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QtGlobal>
+#include <QStatusBar>
 #include "mainwindow.h"
 #include "PathUtils.h"
 #include "QStringUtils.h"
@@ -49,9 +50,36 @@ int main(int argc, char* argv[])
 	QCommandLineOption load_state_option("state", "Load state at index", "state_index");
 	parser.addOption(load_state_option);
 
+#ifdef BUILD_REMOTE_DEBUGGER
+	QCommandLineOption remote_option("remote-debug", "Start remote debugger at the given address", "address:port");
+	parser.addOption(remote_option);
+	QCommandLineOption no_remote_option("no-remote-debug", "Disable remote debugger for this run");
+	parser.addOption(no_remote_option);
+#endif
 	parser.process(a);
 
 	MainWindow w;
+#ifdef BUILD_REMOTE_DEBUGGER
+	if(parser.isSet(remote_option) && parser.isSet(no_remote_option))
+	{
+		fprintf(stderr, "Use only one of --remote-debug and --no-remote-debug.\n");
+		return 1;
+	}
+	if(!parser.isSet(no_remote_option))
+	{
+		try
+		{
+			if(parser.isSet(remote_option)) w.StartRemoteDebugger(parser.value(remote_option));
+			else w.StartRemoteDebuggerFromPreferences();
+		}
+		catch(const std::exception& e)
+		{
+			fprintf(stderr, "Remote debugger: %s\n", e.what());
+			if(parser.isSet(remote_option)) return 1;
+			w.statusBar()->showMessage(QObject::tr("Remote debugger could not start: %1").arg(QString::fromUtf8(e.what())));
+		}
+	}
+#endif
 	w.show();
 
 	if(parser.isSet(cdrom_image_option))

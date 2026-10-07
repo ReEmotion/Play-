@@ -11,6 +11,8 @@ CMemoryViewMIPSWnd::CMemoryViewMIPSWnd(QWidget* parent, CVirtualMachine& virtual
 	ui->setupUi(this);
 
 	auto getByte = [ctx](uint32 address) {
+		std::unique_lock debugLock(ctx->m_debugMutex, std::try_to_lock);
+		if(!debugLock.owns_lock()) return uint8(0xCC);
 		uint32 physAddr = ctx->m_pAddrTranslator(ctx, address);
 		return ctx->m_pMemoryMap->GetByte(physAddr);
 	};

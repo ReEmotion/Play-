@@ -7,6 +7,7 @@
 #include "GsContextView.h"
 #include "FrameDump.h"
 #include "Vu1Vm.h"
+#include "FrameReplaySession.h"
 #include "Vu1ProgramView.h"
 
 namespace Ui
@@ -75,14 +76,13 @@ private:
 	void Redraw();
 
 	Ui::QtFramedebugger* ui;
-	QOffscreenSurface* m_offscreenSurface = nullptr;
-
-	std::unique_ptr<CGSHandler> m_gs;
-	CGsPacketMetadata m_currentMetadata;
-	DRAWINGKICK_INFO m_currentDrawingKick;
+	FrameReplaySession m_replay;
+	std::unique_ptr<CGSHandler>& m_gs = m_replay.gs;
+	CGsPacketMetadata& m_currentMetadata = m_replay.metadata;
+	DRAWINGKICK_INFO& m_currentDrawingKick = m_replay.kick;
 	CGsContextView::FB_DISPLAY_MODE m_fbDisplayMode = CGsContextView::FB_DISPLAY_MODE_RAW;
-	CFrameDump m_frameDump;
-	CVu1Vm m_vu1vm;
+	CFrameDump& m_frameDump = m_replay.dump;
+	CVu1Vm& m_vu1vm = m_replay.vu;
 
 	std::unique_ptr<CGsContextView> m_gsContextView0;
 	std::unique_ptr<CGsContextView> m_gsContextView1;

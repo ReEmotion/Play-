@@ -181,6 +181,7 @@ uint32 CDebugExpressionEvaluator::Evaluate(const TokenArray& tokens, CMIPS* cont
 				result *= operand;
 				break;
 			case OP_DIV:
+				if(operand == 0) throw std::runtime_error("Division by zero.");
 				result /= operand;
 				break;
 			case OP_INVALID:
@@ -195,5 +196,6 @@ uint32 CDebugExpressionEvaluator::Evaluate(const TokenArray& tokens, CMIPS* cont
 		}
 	}
 
+	if(tokens.empty() || opType != OP_INVALID) throw std::runtime_error("Incomplete expression.");
 	return result;
 }

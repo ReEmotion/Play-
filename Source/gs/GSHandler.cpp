@@ -343,9 +343,54 @@ void CGSHandler::TriggerFrameDump(const FrameDumpCallback& frameDumpCallback)
 	    [=]() {
 		    if(m_frameDumpCallback) return;
 		    m_frameDumpCallback = frameDumpCallback;
+		    m_frameDumpRequested = true;
 	    });
 #endif
 }
+
+#ifdef DEBUGGER_INCLUDED
+bool CGSHandler::ArmFrameDump(uint64 owner, const FrameDumpCallback& callback)
+{
+	if(m_frameDumpCallback) return false;
+	m_frameDumpOwner = owner; m_frameDumpCallback = callback; m_frameDumpRequested = true;
+	return true;
+}
+void CGSHandler::CancelFrameDump(uint64 owner)
+{
+	if(m_frameDumpOwner != owner) return;
+	m_frameDumpRequested = false;
+	m_frameDumpCallback = FrameDumpCallback(); m_frameDump.reset(); m_frameDumpOwner = 0;
+}
+void CGSHandler::FailFrameDump(const char* message)
+{
+	auto owner = m_frameDumpOwner.load();
+	CancelFrameDump(owner);
+	OnFrameDumpFailure(owner, message);
+}
+
+CGSHandler::DebugState CGSHandler::GetDebugState(bool includeRam)
+{
+	if(includeRam) SyncMemoryCache();
+	DebugState state;
+	std::copy(std::begin(m_nReg), std::end(m_nReg), state.registers.begin());
+	{
+		std::lock_guard lock(m_registerMutex);
+		state.privateRegisters = {
+		    {"PMODE", m_nPMODE}, {"SMODE2", m_nSMODE2},
+		    {"DISPFB1", m_nDISPFB1.value.q}, {"DISPLAY1", m_nDISPLAY1.value.q},
+		    {"DISPFB2", m_nDISPFB2.value.q}, {"DISPLAY2", m_nDISPLAY2.value.q},
+		    {"CSR", m_nCSR}, {"IMR", m_nIMR}, {"BUSDIR", m_nBUSDIR},
+		    {"SIGLBLID", m_nSIGLBLID}, {"CRT_MODE", m_crtMode},
+		    {"CBP0", m_nCBP0}, {"CBP1", m_nCBP1}};
+		state.delayedRegisters = {{"DISPFB1", m_nDISPFB1.heldValue}, {"DISPLAY1", m_nDISPLAY1.heldValue},
+		                          {"DISPFB2", m_nDISPFB2.heldValue}, {"DISPLAY2", m_nDISPLAY2.heldValue}};
+	}
+	state.transferSize = m_trxCtx.nSize; state.transferRealSize = m_trxCtx.nRealSize;
+	state.transferX = m_trxCtx.nRRX; state.transferY = m_trxCtx.nRRY; state.transferDirty = m_trxCtx.nDirty;
+	if(includeRam) state.ram.assign(GetRam(), GetRam() + RAMSIZE);
+	return state;
+}
+#endif
 
 void CGSHandler::UpdateFrameDumpState()
 {
@@ -354,6 +399,8 @@ void CGSHandler::UpdateFrameDumpState()
 	{
 		m_frameDumpCallback(*m_frameDump.get());
 		m_frameDumpCallback = FrameDumpCallback();
+		m_frameDumpRequested = false;
+		m_frameDumpOwner = 0;
 		m_frameDump.reset();
 	}
 	else if(m_frameDumpCallback)
@@ -638,7 +685,7 @@ void CGSHandler::FeedImageData(const void* data, uint32 length)
 #ifdef DEBUGGER_INCLUDED
 		    if(m_frameDump)
 		    {
-			    m_frameDump->AddImagePacket(imageData, length);
+			    if(!m_frameDump->AddImagePacket(imageData, length)) FailFrameDump("Frame dump exceeded 64 MiB storage limit.");
 		    }
 #endif
 		    FeedImageDataImpl(imageData, length);
@@ -658,18 +705,28 @@ void CGSHandler::ProcessWriteBuffer(const CGsPacketMetadata* metadata)
 	assert(m_writeBufferProcessIndex <= m_writeBufferSize);
 	assert(m_writeBufferSubmitIndex <= m_writeBufferProcessIndex);
 #ifdef DEBUGGER_INCLUDED
-	if(uint32 packetSize = m_writeBufferSize - m_writeBufferProcessIndex; packetSize != 0)
+	// Do not copy 35 KiB VU metadata into every GS job unless a capture is armed.
+	if(uint32 packetSize = m_writeBufferSize - m_writeBufferProcessIndex; packetSize && m_frameDumpRequested)
 	{
-		SendGSCall(
-		    [this,
-		     packet = m_currentWriteBuffer + m_writeBufferProcessIndex,
-		     packetSize,
-		     metadata = metadata ? *metadata : CGsPacketMetadata()]() {
-			    if(m_frameDump)
-			    {
-				    m_frameDump->AddRegisterPacket(packet, packetSize, &metadata);
-			    }
-		    });
+		uint64 bytes = sizeof(CGsPacketMetadata);
+		auto pending = m_pendingDumpBytes.fetch_add(bytes);
+		if(pending + bytes > 8 * 1024 * 1024)
+		{
+			m_pendingDumpBytes.fetch_sub(bytes);
+			if(m_frameDumpRequested.exchange(false)) SendGSCall([this] { FailFrameDump("Frame capture metadata queue exceeded 8 MiB."); });
+		}
+		else
+		{
+			auto owner = m_frameDumpOwner.load();
+			SendGSCall([this, owner, bytes,
+			            packet = m_currentWriteBuffer + m_writeBufferProcessIndex, packetSize,
+			            metadata = metadata ? *metadata : CGsPacketMetadata()] {
+				m_pendingDumpBytes.fetch_sub(bytes);
+				if(m_frameDump && m_frameDumpOwner == owner && m_frameDumpRequested &&
+				   !m_frameDump->AddRegisterPacket(packet, packetSize, &metadata))
+					FailFrameDump("Frame dump exceeded 64 MiB storage limit.");
+			});
+		}
 	}
 #endif
 	for(uint32 writeIndex = m_writeBufferProcessIndex; writeIndex < m_writeBufferSize; writeIndex++)
@@ -2185,6 +2242,7 @@ void CGSHandler::ThreadProc()
 
 void CGSHandler::SendGSCall(const CMailBox::FunctionType& function, bool waitForCompletion, bool forceWaitForCompletion)
 {
+	if((waitForCompletion || forceWaitForCompletion) && m_gsThreaded && std::this_thread::get_id() == m_thread.get_id()) { function(); return; }
 	if(!m_gsThreaded)
 	{
 		waitForCompletion = false;
@@ -2216,4 +2274,37 @@ void CGSHandler::ProcessSingleFrame()
 Framework::CBitmap CGSHandler::GetScreenshot()
 {
 	throw std::runtime_error("Screenshot feature is not implemented in current backend.");
+}
+
+// Called on the GS thread after queued rendering commands have completed.
+Framework::CBitmap CGSHandler::ComposeScreenshot(const std::function<Framework::CBitmap(const DISPLAY_INFO::LAYER&)>& read, unsigned scale)
+{
+	auto display = GetCurrentDisplayInfo();
+	if(!display.width || !display.height || display.width > 4096 || display.height > 4096) return {};
+	Framework::CBitmap result(display.width * scale, display.height * scale, 32);
+	memset(result.GetPixels(), 0, result.GetPixelsSize());
+	bool present = false;
+	for(unsigned i = 0; i < DISPLAY_INFO::MAX_LAYERS; i++)
+	{
+		const auto& layer = display.layers[i]; if(!layer.enabled) continue;
+		auto bitmap = read(layer); if(bitmap.IsEmpty()) continue;
+		present = true;
+		for(unsigned y = 0; y < std::min(layer.height * scale, bitmap.GetHeight()); y++)
+		for(unsigned x = 0; x < std::min(layer.width * scale, bitmap.GetWidth()); x++)
+		{
+			unsigned dx = x + layer.offsetX * scale, dy = y + layer.offsetY * scale;
+			if(dx >= result.GetWidth() || dy >= result.GetHeight()) continue;
+			auto color = bitmap.GetPixel(x, y);
+			if(i > 0)
+			{
+				auto background = result.GetPixel(dx, dy);
+				unsigned alpha = std::min<unsigned>(128, layer.useConstantAlpha ? layer.constantAlpha : color.a);
+				color.r = (color.r * alpha + background.r * (128 - alpha)) / 128;
+				color.g = (color.g * alpha + background.g * (128 - alpha)) / 128;
+				color.b = (color.b * alpha + background.b * (128 - alpha)) / 128;
+			}
+			color.a = 255; result.SetPixel(dx, dy, color);
+		}
+	}
+	return present ? result : Framework::CBitmap();
 }

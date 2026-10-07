@@ -2260,35 +2260,10 @@ void CGSH_OpenGL::ProcessClutTransfer(uint32 csa, uint32)
 
 Framework::CBitmap CGSH_OpenGL::GetScreenshot()
 {
-#if 0
-	auto dispInfo = GetCurrentDisplayInfo();
-	const auto& dispLayer = dispInfo.layers[0];
-
-	FramebufferPtr framebuffer;
-	for(const auto& candidateFramebuffer : m_framebuffers)
-	{
-		if(
-		    (candidateFramebuffer->m_basePtr == dispLayer.bufPtr) &&
-		    (GetFramebufferBitDepth(candidateFramebuffer->m_psm) == GetFramebufferBitDepth(dispLayer.psm)) &&
-		    (candidateFramebuffer->m_width == dispLayer.bufWidth))
-		{
-			//We have a winner
-			framebuffer = candidateFramebuffer;
-			break;
-		}
-	}
-
-	auto imgbuffer = Framework::CBitmap(dispWidth * m_fbScale, dispHeight * m_fbScale, 32);
-	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer->m_framebuffer);
-	glReadPixels(0, 0, dispWidth * m_fbScale, dispHeight * m_fbScale, GL_RGBA, GL_UNSIGNED_BYTE, imgbuffer.GetPixels());
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	if(halfHeight)
-	{
-		return imgbuffer.Resize(dispWidth * m_fbScale, dispHeight * 2 * m_fbScale);
-	}
-	return imgbuffer;
-#endif
-	return Framework::CBitmap();
+	return ComposeScreenshot([this](const DISPLAY_INFO::LAYER& layer) {
+		FRAME frame = {}; frame.nPtr = layer.bufPtr / 8192; frame.nWidth = layer.bufWidth / 64; frame.nPsm = layer.psm;
+		return GetFramebufferImpl(frame);
+	}, m_fbScale);
 }
 
 Framework::CBitmap CGSH_OpenGL::GetFramebuffer(uint64 frameReg)
@@ -2371,6 +2346,7 @@ Framework::CBitmap CGSH_OpenGL::GetTextureImpl(uint64 tex0Reg, uint32 maxMip, ui
 		    switch(format)
 		    {
 		    case PSMCT16:
+		    case PSMCT16S:
 			    return 16;
 		    case PSMT4:
 		    case PSMT8:

@@ -27,6 +27,9 @@ void CCallStackWnd::HandleMachineStateChange()
 
 void CCallStackWnd::Update()
 {
+	if(!m_context) return;
+	std::unique_lock debugLock(m_context->m_debugMutex, std::try_to_lock);
+	if(!debugLock.owns_lock()) return;
 	uint32 nPC = m_context->m_State.nPC;
 	uint32 nRA = m_context->m_State.nGPR[CMIPS::RA].nV[0];
 	uint32 nSP = m_context->m_State.nGPR[CMIPS::SP].nV[0];

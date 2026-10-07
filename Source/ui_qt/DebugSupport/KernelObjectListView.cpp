@@ -77,6 +77,9 @@ void CKernelObjectListView::SetObjectType(uint32 objectType)
 
 void CKernelObjectListView::Update()
 {
+	if(!m_context) return;
+	std::unique_lock debugLock(m_context->m_debugMutex, std::try_to_lock);
+	if(!debugLock.owns_lock()) return;
 	if(m_model)
 	{
 		m_model->clear();

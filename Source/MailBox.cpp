@@ -2,13 +2,14 @@
 
 bool CMailBox::IsPending() const
 {
-	return m_calls.size() != 0;
+	std::lock_guard callLock(m_callMutex);
+	return !m_calls.empty();
 }
 
 void CMailBox::WaitForCall()
 {
 	std::unique_lock callLock(m_callMutex);
-	while(!IsPending())
+	while(m_calls.empty())
 	{
 		m_waitCondition.wait(callLock);
 	}
@@ -17,7 +18,7 @@ void CMailBox::WaitForCall()
 void CMailBox::WaitForCall(unsigned int timeOut)
 {
 	std::unique_lock callLock(m_callMutex);
-	if(IsPending()) return;
+	if(!m_calls.empty()) return;
 	m_waitCondition.wait_for(callLock, std::chrono::milliseconds(timeOut));
 }
 
@@ -70,7 +71,7 @@ void CMailBox::ReceiveCall()
 	MESSAGE message;
 	{
 		std::lock_guard callLock(m_callMutex);
-		if(!IsPending()) return;
+		if(m_calls.empty()) return;
 		message = std::move(m_calls.front());
 		m_calls.pop_front();
 	}

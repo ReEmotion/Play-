@@ -40,3 +40,6 @@ xcuserdata
 
 # npm
 node_modules
+
+/build-remote/
+__pycache__/

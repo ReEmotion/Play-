@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "play-debugger": {
+      "command": "/absolute/path/to/Play-/.venv-mcp/bin/python",
+      "args": [
+        "/absolute/path/to/Play-/tools/remote_debugger/playdebug.py",
+        "--host", "127.0.0.1",
+        "--port", "28011",
+        "mcp"
+      ]
+    }
+  }
+}
