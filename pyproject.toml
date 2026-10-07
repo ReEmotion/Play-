@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "play-debugger-mcp"
+version = "1.0.0"
+description = "Play! PS2 remote debugger CLI and stdio MCP server"
+readme = "docs/remote-debugger-mcp.md"
+requires-python = ">=3.10"
+license = "BSD-2-Clause"
+license-files = ["License.txt"]
+dependencies = ["mcp>=2.3,<3"]
+
+[project.scripts]
+play-debugger-mcp = "playdebug_mcp:main"
+playdebug = "playdebug:main"
+
+[project.urls]
+Repository = "https://github.com/ReEmotion/Play-"
+Documentation = "https://github.com/ReEmotion/Play-/blob/feature/remote-debugger-mcp/docs/remote-debugger-mcp.md"
+
+[tool.setuptools]
+package-dir = {"" = "tools/remote_debugger"}
+py-modules = ["playdebug", "playdebug_mcp"]
+include-package-data = false

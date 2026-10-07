@@ -43,3 +43,5 @@ node_modules
 
 /build-remote/
 __pycache__/
+/dist/
+/tools/remote_debugger/*.egg-info/

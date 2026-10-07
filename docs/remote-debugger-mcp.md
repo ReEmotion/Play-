@@ -4,7 +4,41 @@ The CLI supports a stdio MCP server. It exposes every remote debugger RPC, exist
 
 ## Install and launch
 
-Use Python 3.10+ and the [official MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk). The MCP dependency is optional; the existing debugger SDK and CLI still use only the standard library.
+With [uvx](https://docs.astral.sh/uv/guides/tools/), run directly from the feature branch; dependencies are installed automatically:
+
+```bash
+uvx --from 'git+https://github.com/ReEmotion/Play-.git@feature/remote-debugger-mcp' \
+  play-debugger-mcp --host 127.0.0.1 --port 28011
+```
+
+Use this MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "play-debugger": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/ReEmotion/Play-.git@feature/remote-debugger-mcp",
+        "play-debugger-mcp",
+        "--host", "127.0.0.1",
+        "--port", "28011"
+      ]
+    }
+  }
+}
+```
+
+The same configuration is in [mcp.example.json](../tools/remote_debugger/mcp.example.json). Change `--host` / `--port` to match Play!. The client launches the stdio process, and `play_connect` establishes the debugger connection.
+
+For a local checkout:
+
+```bash
+uvx --from . play-debugger-mcp --host 127.0.0.1 --port 28011
+uvx --from . playdebug --json status
+```
+
+The package contains the two debugger Python modules and license; it does not build the emulator. It requires Python 3.10+ and the [official MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk). The source SDK and ordinary CLI still use only the standard library. Manual installation remains available:
 
 ```bash
 python3 -m venv .venv-mcp
@@ -14,7 +48,7 @@ python3 -m venv .venv-mcp
 
 The equivalent standalone entry point is `tools/remote_debugger/playdebug_mcp.py`. Both use stdin/stdout exclusively for MCP messages and stderr for diagnostic output. Play! must already be running with its Remote Debugger enabled. Use the same SSH tunnel as the ordinary CLI for a remote emulator.
 
-Copy [mcp.example.json](../tools/remote_debugger/mcp.example.json) into your MCP client's server configuration and replace both absolute paths. Change `--host` / `--port` to match the debugger. The server connects only when `play_connect` is called.
+To use the manually installed environment in a client, set `command` to its absolute Python path and `args` to the absolute `playdebug.py` path followed by `--host`, `127.0.0.1`, `--port`, `28011`, `mcp`.
 
 ## Tools
 
@@ -74,3 +108,10 @@ python3 tools/remote_debugger/tests/test_client.py
 ```
 
 MCP tests cover discovery without target attachment, persistent control, structured errors, chunked exports/resources, CLI delegation, path validation, event/control concurrency, cancellation before sending mutations, stdio cleanup, and a `2025-11-25` MCP client handshake. The Linux integration uses an isolated configuration and a memory-capped Vulkan emulator; it covers live CPU/memory access, screenshots, GS dumps, frame capture/replay, captured VU1 stepping, and reconnection.
+
+To test the installed package rather than source scripts, set `PLAY_MCP_TEST_COMMAND` to a JSON command array for either runner:
+
+```bash
+PLAY_MCP_TEST_COMMAND='["uvx","--from",".","play-debugger-mcp"]' \
+  .venv-mcp/bin/python tools/remote_debugger/tests/test_mcp.py -v
+```

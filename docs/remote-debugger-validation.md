@@ -48,6 +48,13 @@
 - Five MCP tests passed using the official Python client over real stdio, including a legacy `2025-11-25` handshake, structured errors, persistent session reuse, chunked exports, resource release, path validation, concurrent event/control calls, cancellation of active requests and unsent mutations, and EOF cleanup. SDK tests passed 7/7; enabled-build CTest passed 8/8.
 - Real Vulkan MCP integration passed: `/tmp/play-mcp-check-uen_8bkw`. Verified full-width registers across four CPUs, memory write/read, background frame advancement, repeated connect without another pause, paused GS state / 4 MiB RAM dump with unchanged PCs/frames, readable JSON / PNG resources, MCP screenshot preview, CLI frame capture, Vulkan replay image export, captured VU1 stepping, explicit reconnect, and normal Qt/service exit. Artifacts and runtime log remain in that isolated test directory.
 
+## uvx package
+
+- Added Python distribution metadata and `play-debugger-mcp` / `playdebug` console entry points. The MCP configuration launches `uvx` from the GitHub feature branch with automatic dependency installation.
+- Built the source distribution and a wheel from that distribution. Verified the wheel contains only the two Python modules, license, and package metadata; no emulator sources, ISO, ELF, or captured dumps are shipped.
+- All five stdio MCP tests passed through `uvx` using the installed wheel, including cancellation and resource exports. Installed MCP / CLI entry point help checks passed.
+- Repeated the real Vulkan workflow through the wheel's `uvx` entry point: `/tmp/play-mcp-check-obm4ijxu`. CPU/memory, persistent control, screenshot preview/resources, live GS RAM dump, CLI frame capture, Vulkan replay, captured VU1 stepping, reconnect, and Qt shutdown passed.
+
 ## OOM 原因与回归
 
 15:41:35 内核记录全局 OOM，杀死 Play PID 175177：匿名 RSS 29390048 KiB（约 28 GiB）。此前高频测试程序不断提交 GS 寄存器写入；现有调试构建把完整 VU 元数据复制进每次异步 GS 调用，即使没有帧捕获，也会堆积大对象。

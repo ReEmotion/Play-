@@ -21,8 +21,10 @@ from x11_focus import graceful_close
 
 async def verify(root, port, fixture):
     cli = Path(__file__).resolve().parents[1] / 'playdebug.py'
-    params = StdioServerParameters(command=sys.executable, args=[str(cli), '--port', str(port),
-                                  '--output-dir', str(root / 'exports'), 'mcp'])
+    options = ['--port', str(port), '--output-dir', str(root / 'exports')]
+    override = json.loads(os.environ.get('PLAY_MCP_TEST_COMMAND', 'null'))
+    command = override + options if override else [sys.executable, str(cli), *options, 'mcp']
+    params = StdioServerParameters(command=command[0], args=command[1:])
     async with MCPClient(params, read_timeout_seconds=30) as client:
         async def call(name, **arguments):
             value = await client.call_tool(name, arguments)

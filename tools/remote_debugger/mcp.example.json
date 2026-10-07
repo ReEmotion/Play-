@@ -1,12 +1,12 @@
 {
   "mcpServers": {
     "play-debugger": {
-      "command": "/absolute/path/to/Play-/.venv-mcp/bin/python",
+      "command": "uvx",
       "args": [
-        "/absolute/path/to/Play-/tools/remote_debugger/playdebug.py",
+        "--from", "git+https://github.com/ReEmotion/Play-.git@feature/remote-debugger-mcp",
+        "play-debugger-mcp",
         "--host", "127.0.0.1",
-        "--port", "28011",
-        "mcp"
+        "--port", "28011"
       ]
     }
   }

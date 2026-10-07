@@ -3,6 +3,7 @@ import asyncio
 import base64
 from contextlib import asynccontextmanager
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from playdebug import RPC_METHODS
 from test_client import Server, frame
 
 CLI = Path(__file__).resolve().parents[1] / 'playdebug.py'
+MCP_COMMAND = json.loads(os.environ.get('PLAY_MCP_TEST_COMMAND', 'null'))
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0S8AAAAASUVORK5CYII=')
 
 
@@ -29,8 +31,9 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
     async def session(self, handler):
         server = Server(handler)
         with tempfile.TemporaryDirectory(prefix='play-mcp-test-') as directory:
-            params = StdioServerParameters(command=sys.executable, args=[str(CLI), '--port', str(server.port),
-                                         '--output-dir', directory, 'mcp'])
+            options = ['--port', str(server.port), '--output-dir', directory]
+            command = MCP_COMMAND + options if MCP_COMMAND else [sys.executable, str(CLI), *options, 'mcp']
+            params = StdioServerParameters(command=command[0], args=command[1:])
             try:
                 async with MCPClient(params, read_timeout_seconds=10) as client:
                     yield client, Path(directory)
@@ -181,7 +184,8 @@ class LegacyStdioTests(unittest.TestCase):
             {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
         ]
         # Keep stdin open until both responses arrive; EOF also tests normal shutdown.
-        with subprocess.Popen([sys.executable, str(CLI), 'mcp'], stdin=subprocess.PIPE,
+        command = MCP_COMMAND or [sys.executable, str(CLI), 'mcp']
+        with subprocess.Popen(command, stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
             for message in messages:
                 process.stdin.write(json.dumps(message) + '\n')
